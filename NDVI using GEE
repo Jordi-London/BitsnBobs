@@ -1,0 +1,95 @@
+var roi = ee.FeatureCollection('users/jordibuckley/Catchemnt2')
+
+//print(roi);
+
+//image collection
+var L5 = ee.ImageCollection('LANDSAT/LC08/C01/T1_TOA')
+  //.filterMetadata('CLOUD_COVER', 'less_than', 1)
+  .filterDate('2015-01-01','2019-12-31')
+  .filterBounds(roi);
+
+//Calculate NDVI
+var addNDVI = function(image) {
+  var ndvi = image.normalizedDifference(['B5', 'B4'])
+                  .rename('ndvi');
+  return image.addBands(ndvi);
+};
+
+//aplly ndvi for collection
+var L5_ndvi = L5.map(addNDVI);
+
+print("count", L5_ndvi.size());
+
+var L5_ndvi_list = L5_ndvi.toList(L5_ndvi.size());
+
+var L5_ndvi = L5_ndvi.select(['ndvi']);
+
+//print("L5_ndvi", L5_ndvi);
+
+var L5_ndviVis = {
+  min: 0.15348,
+  max: 0.76315,
+};
+
+Map.addLayer(L5_ndvi, L5_ndviVis, 'L5_ndvi');
+Map.addLayer(roi);
+Map.centerObject(roi, 12);
+
+var feats_list = roi.toList(roi.size());
+
+var ndvi_values = feats_list.map(function (feat) {
+  
+  var ndvi_val = L5_ndvi_list.map(function (image) {
+  
+  var stats = ee.Image(image).reduceRegion(
+    {reducer: ee.Reducer.mean(),
+     geometry: ee.Feature(feat).geometry()});
+  
+    return [ee.Feature(feat).get('nome_imo'), ee.Date(ee.Image(image).get('system:time_start')).format('yyyy-MM-dd'), stats.get('ndvi')];
+  
+  });
+  
+  return ndvi_val;
+  
+}).flatten();
+
+//print("ndvi_values", ndvi_values);
+
+var len = ndvi_values.size();
+
+var list = ee.List.sequence(0, len.subtract(1), 3);
+
+var new_ndvi_values = list.map(function(ele){
+
+  var start = ee.Number(ele).int(); 
+  var end = ee.Number(ele).add(3).int(); 
+
+  var new_list = ee.List([]);
+  var element = ee.List(ndvi_values.slice(start, end));
+
+  new_list = new_list.add(element);
+
+  return new_list.get(0);
+
+});
+
+//print (new_ndvi_values);
+
+var myFeatures = ee.FeatureCollection(new_ndvi_values.map(function(el){
+  el = ee.List(el); // cast every element of the list
+
+  return ee.Feature(null, {
+    'nome_imo': el.get(0),
+    'date_edit': el.get(1),
+    'mean': el.get(2)
+  });
+}));
+
+//print(myFeatures);
+
+// Export features, specifying corresponding names.
+Export.table.toDrive(myFeatures,
+"CSV_Export", //my task
+"GEE_teste", //my export folder
+"NDVI_mean",  //file name
+"CSV");
